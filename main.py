@@ -217,7 +217,10 @@ def save_excel(data):
 
     today = datetime.now().strftime("%m-%d")
 
-    filename = f"游戏下载链接{today}.xlsx"
+    # 创建data目录
+    os.makedirs("data", exist_ok=True)
+
+    filename = f"data/游戏下载链接{today}.xlsx"
 
     df = pd.DataFrame(data)
 
