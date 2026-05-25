@@ -23,7 +23,7 @@ PASSWORD = "aa123456"
 # True  = 只下载1~5
 # False = 正式模式每天100条
 # =========================
-TEST_MODE = True
+TEST_MODE = False
 
 # =========================
 # Session
