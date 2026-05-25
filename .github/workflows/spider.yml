@@ -38,6 +38,7 @@ jobs:
           git config --global user.name github-actions
           git config --global user.email github-actions@github.com
 
+          git add data/*.xlsx
           git add progress.txt
           git commit -m "更新进度" || echo "无变化"
 
