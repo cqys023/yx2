@@ -1,11 +1,16 @@
 name: 自动抓取游戏数据
 
+permissions:
+  contents: write
+
 on:
   schedule:
     - cron: '0 1 * * *'
+
   workflow_dispatch:
 
 jobs:
+
   run-spider:
 
     runs-on: ubuntu-latest
