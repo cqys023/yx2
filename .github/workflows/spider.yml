@@ -1,0 +1,45 @@
+name: 自动抓取游戏数据
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-spider:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: 拉取仓库
+        uses: actions/checkout@v4
+
+      - name: 安装Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+
+      - name: 运行脚本
+        run: |
+          python main.py
+
+      - name: 提交progress
+        run: |
+          git config --global user.name github-actions
+          git config --global user.email github-actions@github.com
+
+          git add progress.txt
+          git commit -m "更新进度" || echo "无变化"
+
+          git push
+
+      - name: 上传Excel
+        uses: actions/upload-artifact@v4
+        with:
+          name: 游戏数据
+          path: "*.xlsx"
