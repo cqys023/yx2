@@ -631,16 +631,18 @@ def queue_detail_task(game_id, detail_url):
 def upload_detail_page(game_id, detail_url):
 
     if not GAME_API_URL or not GAME_API_TOKEN:
+        raise RuntimeError("缺少 GAME_API_URL 或 GAME_API_TOKEN")
 
-        raise RuntimeError(
-            "缺少 GAME_API_URL 或 GAME_API_TOKEN"
-        )
+    print("\n正在下载游戏详情页：", game_id)
 
     page_html = build_detail_html(detail_url)
 
+    print("详情 HTML 下载成功")
+    print("HTML 大小：", round(len(page_html.encode("utf-8")) / 1024, 2), "KB")
+
     headers = {
         "Authorization": f"Bearer {GAME_API_TOKEN}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json; charset=utf-8"
     }
 
     payload = {
@@ -649,45 +651,35 @@ def upload_detail_page(game_id, detail_url):
         "html": page_html
     }
 
+    # 不转义中文，减少上传数据体积
+    request_data = json.dumps(
+        payload,
+        ensure_ascii=False
+    ).encode("utf-8")
+
     response = requests.post(
         GAME_API_URL,
-        json=payload,
+        data=request_data,
         headers=headers,
-        timeout=120
+        timeout=180
     )
 
-    print(
-        "详情页上传 HTTP 状态：",
-        response.status_code
-    )
-
-    print(
-        "详情页上传返回：",
-        response.text[:1000]
-    )
+    print("详情页上传 HTTP 状态：", response.status_code)
+    print("详情页上传返回：", response.text[:2000])
 
     response.raise_for_status()
 
     try:
-
         result = response.json()
-
     except ValueError as e:
-
         raise RuntimeError(
-            "详情页接口没有返回有效 JSON"
+            "详情页接口没有返回有效 JSON：" + response.text[:1000]
         ) from e
 
     if not result.get("success"):
+        raise RuntimeError(f"详情页上传失败：{result}")
 
-        raise RuntimeError(
-            f"详情页上传失败：{result}"
-        )
-
-    print(
-        "详情页已保存：",
-        result.get("detail_html_url", "")
-    )
+    print("详情页已保存：", result.get("detail_html_url", ""))
 
     return result.get("detail_html_url", "")
 
