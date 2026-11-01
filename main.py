@@ -689,6 +689,53 @@ def upload_detail_page(game_id, detail_url):
 # =====================================================
 
 def retry_failed_details():
+    # =====================================================
+# 根据当天 Excel 自动补充详情页任务
+# =====================================================
+
+def rebuild_daily_detail_tasks():
+
+    print("\n===================================")
+    print("开始检查当天 Excel 中的详情页任务")
+    print("===================================")
+
+    if not daily_data:
+        print("当天没有游戏记录")
+        return
+
+    added = 0
+
+    for item in daily_data:
+
+        game_id = str(
+            item.get("game_id", "")
+        ).strip()
+
+        detail_url = str(
+            item.get("detail_url", "")
+        ).strip()
+
+        if not game_id or game_id.lower() == "nan":
+            continue
+
+        if not detail_url or detail_url.lower() == "nan":
+            print(f"游戏 {game_id} 缺少详情页地址，跳过")
+            continue
+
+        queue_detail_task(
+            game_id,
+            detail_url
+        )
+
+        added += 1
+
+    print("当天 Excel 游戏数量：", len(daily_data))
+    print("已补充详情页任务：", added)
+
+    tasks = load_detail_failed()
+
+    print("当前详情页待处理任务总数：", len(tasks))
+    print("===================================")
     tasks = load_detail_failed()
 
     print("=" * 50)
