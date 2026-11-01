@@ -964,7 +964,7 @@ def upload_to_mysql_api(games):
         "Content-Type": "application/json; charset=utf-8"
     }
 
-    batch_size = 10
+    batch_size = max(1, len(games))
     total = len(games)
     success_count = 0
     failed_batches = []
