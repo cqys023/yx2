@@ -689,10 +689,16 @@ def upload_detail_page(game_id, detail_url):
 # =====================================================
 
 def retry_failed_details():
-
     tasks = load_detail_failed()
 
+    print("=" * 50)
+    print("详情页任务队列检查")
+    print(f"当前待处理详情页任务数：{len(tasks)}")
+    print(f"任务队列文件：{DETAIL_FAILED_FILE}")
+    print("=" * 50)
+
     if not tasks:
+        print("详情页任务队列为空，没有需要上传的详情页")
         return
 
     print(
