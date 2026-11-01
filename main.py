@@ -34,8 +34,8 @@ DETAIL_FAILED_FILE = os.path.join(DATA_DIR, "详情页上传失败记录.json")
 # yyds567 网站登录账号
 # =====================================================
 
-USERNAME = ""
-PASSWORD = ""
+USERNAME = "qqaazz"
+PASSWORD = "aa123456"
 
 # =====================================================
 # 宝塔 API 配置
