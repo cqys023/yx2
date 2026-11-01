@@ -684,73 +684,24 @@ def upload_detail_page(game_id, detail_url):
     return result.get("detail_html_url", "")
 
 
+
 # =====================================================
 # 重试历史详情页上传失败任务
 # =====================================================
 
 def retry_failed_details():
-    # =====================================================
-# 根据当天 Excel 自动补充详情页任务
-# =====================================================
-
-def rebuild_daily_detail_tasks():
-
-    print("\n===================================")
-    print("开始检查当天 Excel 中的详情页任务")
-    print("===================================")
-
-    if not daily_data:
-        print("当天没有游戏记录")
-        return
-
-    added = 0
-
-    for item in daily_data:
-
-        game_id = str(
-            item.get("game_id", "")
-        ).strip()
-
-        detail_url = str(
-            item.get("detail_url", "")
-        ).strip()
-
-        if not game_id or game_id.lower() == "nan":
-            continue
-
-        if not detail_url or detail_url.lower() == "nan":
-            print(f"游戏 {game_id} 缺少详情页地址，跳过")
-            continue
-
-        queue_detail_task(
-            game_id,
-            detail_url
-        )
-
-        added += 1
-
-    print("当天 Excel 游戏数量：", len(daily_data))
-    print("已补充详情页任务：", added)
 
     tasks = load_detail_failed()
 
-    print("当前详情页待处理任务总数：", len(tasks))
-    print("===================================")
-    tasks = load_detail_failed()
-
-    print("=" * 50)
+    print("\n" + "=" * 50)
     print("详情页任务队列检查")
-    print(f"当前待处理详情页任务数：{len(tasks)}")
-    print(f"任务队列文件：{DETAIL_FAILED_FILE}")
+    print("当前待处理详情页任务数：", len(tasks))
+    print("任务队列文件：", DETAIL_FAILED_FILE)
     print("=" * 50)
 
     if not tasks:
-        print("详情页任务队列为空，没有需要上传的详情页")
+        print("详情页任务队列为空")
         return
-
-    print(
-        f"\n发现 {len(tasks)} 条待重试详情页任务"
-    )
 
     remaining = []
 
@@ -774,7 +725,7 @@ def rebuild_daily_detail_tasks():
             try:
 
                 print(
-                    f"重试详情页 {game_id}，"
+                    f"\n处理详情页 {game_id}，"
                     f"第 {attempt}/3 次"
                 )
 
@@ -792,17 +743,66 @@ def rebuild_daily_detail_tasks():
                     f"详情页 {game_id} 上传失败：{e}"
                 )
 
-                time.sleep(3)
+                if attempt < 3:
+                    time.sleep(3)
 
         if not success:
             remaining.append(task)
 
     save_detail_failed(remaining)
 
-    print(
-        "详情页待重试数量：",
-        len(remaining)
-    )
+    print("\n详情页处理结束")
+    print("上传成功数量：", len(tasks) - len(remaining))
+    print("仍然失败数量：", len(remaining))
+
+
+# =====================================================
+# 根据当天 Excel 自动补充详情页任务
+# =====================================================
+
+def rebuild_daily_detail_tasks(daily_data):
+
+    print("\n" + "=" * 50)
+    print("开始检查当天 Excel 中的详情页任务")
+    print("=" * 50)
+
+    if not daily_data:
+        print("当天没有游戏记录")
+        return
+
+    added = 0
+
+    for item in daily_data:
+
+        game_id = str(
+            item.get("game_id", "")
+        ).strip()
+
+        detail_url = str(
+            item.get("detail_url", "")
+        ).strip()
+
+        if not game_id or game_id.lower() == "nan":
+            continue
+
+        if not detail_url or detail_url.lower() == "nan":
+            print(f"游戏 {game_id} 缺少详情页地址")
+            continue
+
+        queue_detail_task(
+            game_id,
+            detail_url
+        )
+
+        added += 1
+
+    tasks = load_detail_failed()
+
+    print("当天 Excel 游戏数量：", len(daily_data))
+    print("检查并补充任务数量：", added)
+    print("当前待上传任务总数：", len(tasks))
+    print("=" * 50)
+
 
 
 # =====================================================
@@ -1349,45 +1349,42 @@ def main():
     print("今日文件：", daily_file)
     print("进度文件：", PROGRESS_FILE)
     print("===================================")
+    
+    # =================================================
+    # 上传基本信息到 MySQL
+    # =================================================
 
-# =================================================
-# 先上传基本信息到 MySQL
-# =================================================
+    try:
 
-try:
+        upload_to_mysql_api(daily_data)
 
-    upload_to_mysql_api(daily_data)
+    except Exception as e:
 
-except Exception as e:
-
-    print("\n游戏基本信息上传出现问题：", e)
-
-
-# =================================================
-# 根据当天 Excel 重新补充详情页任务
-# =================================================
-
-rebuild_daily_detail_tasks()
+        print("\n游戏基本信息上传出现问题：", e)
 
 
-# =================================================
-# 上传详情页 HTML
-# =================================================
+        # =================================================
+        # 补充当天详情页任务
+        # =================================================
+    
+        rebuild_daily_detail_tasks(daily_data)
+    
+    
+        # =================================================
+        # 上传详情页 HTML
+        # =================================================
+    
+        print("\n===================================")
+        print("开始处理游戏详情页 HTML 上传任务...")
+        print("===================================")
+    
+        retry_failed_details()
+    
+        print("\n===================================")
+        print("本次详情页 HTML 任务处理结束")
+        print("===================================")
 
-print("\n===================================")
-print("开始处理游戏详情页 HTML 上传任务...")
-print("===================================")
 
-retry_failed_details()
-
-print("\n===================================")
-print("本次详情页 HTML 任务处理结束")
-print("===================================")
-
-
-# =====================================================
-# 启动
-# =====================================================
 
 if __name__ == "__main__":
     main()
