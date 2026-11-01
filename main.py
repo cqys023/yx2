@@ -3,6 +3,7 @@ import os
 import re
 import json
 import time
+import html
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -27,19 +28,18 @@ SLEEP_TIME = 2
 DATA_DIR = "data"
 MASTER_FILE = os.path.join(DATA_DIR, "游戏下载链接总表.xlsx")
 PROGRESS_FILE = "progress.json"
+DETAIL_FAILED_FILE = os.path.join(DATA_DIR, "详情页上传失败记录.json")
 
 # =====================================================
 # yyds567 网站登录账号
-# 请填写修改后的新密码
 # =====================================================
 
-USERNAME = "qqaazz"
-PASSWORD = "aa123456"
+USERNAME = ""
+PASSWORD = ""
 
 # =====================================================
-# 宝塔 MySQL 上传接口
-# 这两个值由 GitHub Actions Secrets 提供
-# 不要把 Token 写在这里
+# 宝塔 API 配置
+# 由 GitHub Actions Secrets 提供
 # =====================================================
 
 GAME_API_URL = os.getenv("GAME_API_URL", "").strip()
@@ -58,6 +58,7 @@ session.headers.update(HEADERS)
 # =====================================================
 
 def login():
+
     print("\n正在登录账号...")
 
     login_url = BASE_URL + "/wp-admin/admin-ajax.php"
@@ -70,6 +71,7 @@ def login():
     }
 
     try:
+
         r = session.post(
             login_url,
             data=data,
@@ -87,6 +89,7 @@ def login():
         return False
 
     except Exception as e:
+
         print("登录异常：", e)
         return False
 
@@ -96,6 +99,7 @@ def login():
 # =====================================================
 
 def get_page_url(page):
+
     if page <= 1:
         return CATEGORY_URL
 
@@ -181,6 +185,7 @@ def get_game_list(page):
         return game_list
 
     except Exception as e:
+
         print("列表页读取失败：", e)
         return None
 
@@ -207,6 +212,7 @@ def get_final_link(url):
         return r.url
 
     except Exception as e:
+
         print("获取跳转失败：", e)
         return ""
 
@@ -266,6 +272,7 @@ def get_game_data(game_id, detail_url):
             )
 
             if icon_link:
+
                 icon_link = urljoin(
                     BASE_URL,
                     icon_link
@@ -289,18 +296,21 @@ def get_game_data(game_id, detail_url):
                 "百度" in text_a
                 or "pan.baidu.com" in href
             ):
+
                 storage_baidu = get_final_link(href)
 
             elif (
                 "天翼" in text_a
                 or "cloud.189.cn" in href
             ):
+
                 storage_tianyi = get_final_link(href)
 
             elif (
                 "迅雷" in text_a
                 or "xunlei" in href
             ):
+
                 storage_xunlei = get_final_link(href)
 
         # 解压密码
@@ -328,6 +338,7 @@ def get_game_data(game_id, detail_url):
                     break
 
         if not name:
+
             print("没有获取到游戏名称，跳过")
             return None
 
@@ -354,8 +365,399 @@ def get_game_data(game_id, detail_url):
         return result
 
     except Exception as e:
+
         print("详情采集失败：", e)
         return None
+
+
+# =====================================================
+# 采集详情页 HTML
+# =====================================================
+
+def build_detail_html(detail_url):
+
+    print("\n正在采集详情页 HTML：", detail_url)
+
+    response = session.get(
+        detail_url,
+        timeout=45
+    )
+
+    response.raise_for_status()
+    response.encoding = response.apparent_encoding
+
+    soup = BeautifulSoup(
+        response.text,
+        "html.parser"
+    )
+
+    # 找到文章正文
+    article = soup.find("article")
+
+    if not article:
+        raise RuntimeError("没有找到 article 标签")
+
+    # 删除分享区域和脚本
+    for node in article.select(
+        ".entry-share, script, noscript"
+    ):
+
+        node.decompose()
+
+    # 视频添加 16:9 容器
+    for video in article.find_all("video"):
+
+        parent = video.parent
+
+        if (
+            parent
+            and parent.name == "div"
+            and "video-container" in parent.get("class", [])
+        ):
+
+            continue
+
+        wrapper = soup.new_tag(
+            "div",
+            attrs={"class": "video-container"}
+        )
+
+        video.wrap(wrapper)
+
+    # 提取 article 的直接子元素
+    content_elements = article.find_all(
+        recursive=False
+    )
+
+    if not content_elements:
+        raise RuntimeError("article 中没有正文内容")
+
+    content = "".join(
+        str(element)
+        for element in content_elements
+    )
+
+    # HTML 模板
+    template = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>游戏详情</title>
+
+<base href="__BASE_URL__">
+
+<link rel="stylesheet"
+href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+
+<style>
+
+html {
+    background-color: #f0f0f0;
+}
+
+body {
+    font-family: sans-serif;
+    line-height: 1.6;
+    border: 1px solid #ccc;
+    padding: 20px;
+    background-color: white;
+    margin: 20px auto;
+    max-width: 800px;
+    color: #222;
+}
+
+p {
+    margin-bottom: 15px;
+}
+
+img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 10px auto;
+}
+
+.post-note {
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 5px;
+}
+
+.entry-share {
+    display: none !important;
+}
+
+small {
+    font-size: 0.8em;
+}
+
+strong {
+    font-weight: bold;
+}
+
+.container {
+    max-width: 800px;
+}
+
+.video-container {
+    position: relative;
+    padding-bottom: 56.25%;
+    height: 0;
+    overflow: hidden;
+    margin-bottom: 15px;
+    background: #000;
+}
+
+.video-container video {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+pre, table {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+__CONTENT__
+
+</div>
+
+</body>
+</html>"""
+
+    final_html = template.replace(
+        "__BASE_URL__",
+        html.escape(detail_url, quote=True)
+    ).replace(
+        "__CONTENT__",
+        content
+    )
+
+    return final_html
+
+
+# =====================================================
+# 详情页失败任务队列
+# =====================================================
+
+def load_detail_failed():
+
+    if not os.path.exists(DETAIL_FAILED_FILE):
+        return []
+
+    try:
+
+        with open(
+            DETAIL_FAILED_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            data = json.load(f)
+
+        return data if isinstance(data, list) else []
+
+    except Exception as e:
+
+        print("读取详情页失败队列异常：", e)
+        return []
+
+
+def save_detail_failed(tasks):
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    temp_file = DETAIL_FAILED_FILE + ".tmp"
+
+    with open(
+        temp_file,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            tasks,
+            f,
+            ensure_ascii=False,
+            indent=2
+        )
+
+    os.replace(
+        temp_file,
+        DETAIL_FAILED_FILE
+    )
+
+
+def queue_detail_task(game_id, detail_url):
+
+    tasks = load_detail_failed()
+
+    for task in tasks:
+
+        if str(task.get("game_id")) == str(game_id):
+
+            task["detail_url"] = detail_url
+            save_detail_failed(tasks)
+            return
+
+    tasks.append({
+        "game_id": str(game_id),
+        "detail_url": detail_url
+    })
+
+    save_detail_failed(tasks)
+
+
+# =====================================================
+# 上传单个详情页到宝塔
+# =====================================================
+
+def upload_detail_page(game_id, detail_url):
+
+    if not GAME_API_URL or not GAME_API_TOKEN:
+
+        raise RuntimeError(
+            "缺少 GAME_API_URL 或 GAME_API_TOKEN"
+        )
+
+    page_html = build_detail_html(detail_url)
+
+    headers = {
+        "Authorization": f"Bearer {GAME_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "action": "upload_detail",
+        "game_id": str(game_id),
+        "html": page_html
+    }
+
+    response = requests.post(
+        GAME_API_URL,
+        json=payload,
+        headers=headers,
+        timeout=120
+    )
+
+    print(
+        "详情页上传 HTTP 状态：",
+        response.status_code
+    )
+
+    print(
+        "详情页上传返回：",
+        response.text[:1000]
+    )
+
+    response.raise_for_status()
+
+    try:
+
+        result = response.json()
+
+    except ValueError as e:
+
+        raise RuntimeError(
+            "详情页接口没有返回有效 JSON"
+        ) from e
+
+    if not result.get("success"):
+
+        raise RuntimeError(
+            f"详情页上传失败：{result}"
+        )
+
+    print(
+        "详情页已保存：",
+        result.get("detail_html_url", "")
+    )
+
+    return result.get("detail_html_url", "")
+
+
+# =====================================================
+# 重试历史详情页上传失败任务
+# =====================================================
+
+def retry_failed_details():
+
+    tasks = load_detail_failed()
+
+    if not tasks:
+        return
+
+    print(
+        f"\n发现 {len(tasks)} 条待重试详情页任务"
+    )
+
+    remaining = []
+
+    for task in tasks:
+
+        game_id = str(
+            task.get("game_id", "")
+        ).strip()
+
+        detail_url = str(
+            task.get("detail_url", "")
+        ).strip()
+
+        if not game_id or not detail_url:
+            continue
+
+        success = False
+
+        for attempt in range(1, 4):
+
+            try:
+
+                print(
+                    f"重试详情页 {game_id}，"
+                    f"第 {attempt}/3 次"
+                )
+
+                upload_detail_page(
+                    game_id,
+                    detail_url
+                )
+
+                success = True
+                break
+
+            except Exception as e:
+
+                print(
+                    f"详情页 {game_id} 上传失败：{e}"
+                )
+
+                time.sleep(3)
+
+        if not success:
+            remaining.append(task)
+
+    save_detail_failed(remaining)
+
+    print(
+        "详情页待重试数量：",
+        len(remaining)
+    )
 
 
 # =====================================================
@@ -368,10 +770,13 @@ def load_excel(filename):
         return []
 
     try:
+
         df = pd.read_excel(filename)
+
         return df.to_dict("records")
 
     except Exception as e:
+
         print("读取 Excel 失败：", e)
         return []
 
@@ -490,7 +895,8 @@ def save_failed(game_id, detail_url):
     ) as f:
 
         f.write(
-            f"{datetime.now()} | {game_id} | {detail_url}\n"
+            f"{datetime.now()} | "
+            f"{game_id} | {detail_url}\n"
         )
 
 
@@ -508,6 +914,7 @@ def upload_to_mysql_api(games):
         )
 
     if not games:
+
         print("当天没有需要上传数据库的记录")
         return
 
@@ -520,9 +927,11 @@ def upload_to_mysql_api(games):
         for key, value in row.items():
 
             try:
+
                 missing = pd.isna(value)
 
                 if isinstance(missing, bool) and missing:
+
                     item[key] = ""
                     continue
 
@@ -567,15 +976,24 @@ def upload_to_mysql_api(games):
         timeout=120
     )
 
-    print("数据库接口 HTTP 状态：", response.status_code)
-    print("数据库接口返回：", response.text[:2000])
+    print(
+        "数据库接口 HTTP 状态：",
+        response.status_code
+    )
+
+    print(
+        "数据库接口返回：",
+        response.text[:2000]
+    )
 
     response.raise_for_status()
 
     try:
+
         result = response.json()
 
     except ValueError as e:
+
         raise RuntimeError(
             "数据库接口没有返回有效 JSON"
         ) from e
@@ -605,7 +1023,13 @@ def main():
 
     # 登录
     if not login():
-        raise RuntimeError("网站登录失败，程序结束")
+
+        raise RuntimeError(
+            "网站登录失败，程序结束"
+        )
+
+    # 先重试历史详情页任务
+    retry_failed_details()
 
     # 读取总表
     all_data = load_excel(MASTER_FILE)
@@ -744,13 +1168,19 @@ def main():
 
             continue
 
-        # 采集详情
+        # 采集游戏信息
         result = get_game_data(
             game_id,
             detail_url
         )
 
         if result:
+
+            # 将详情页任务加入失败重试队列
+            queue_detail_task(
+                game_id,
+                detail_url
+            )
 
             all_data.append(result)
             daily_data.append(result)
@@ -814,9 +1244,11 @@ def main():
     print("进度文件：", PROGRESS_FILE)
     print("===================================")
 
-    # 上传当天 Excel 中的全部数据
-    # PHP 根据 game_id 自动新增或更新
+    # 先上传游戏数据
     upload_to_mysql_api(daily_data)
+
+    # 再上传详情 HTML
+    retry_failed_details()
 
 
 # =====================================================
