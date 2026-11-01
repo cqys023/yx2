@@ -1297,10 +1297,18 @@ def main():
     print("进度文件：", PROGRESS_FILE)
     print("===================================")
 
-    # 先上传游戏数据
-    upload_to_mysql_api(daily_data)
-
-    # 再上传详情 HTML
+    # 先上传基本信息
+    try:
+    
+        upload_to_mysql_api(daily_data)
+    
+    except Exception as e:
+    
+        print("\n游戏基本信息上传出现问题：", e)
+    
+    # 再尝试上传详情 HTML
+    print("\n开始处理游戏详情页 HTML 上传任务...")
+    
     retry_failed_details()
 
 
