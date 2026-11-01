@@ -896,110 +896,171 @@ def save_failed(game_id, detail_url):
 # 上传数据到宝塔 MySQL
 # =====================================================
 
+
 def upload_to_mysql_api(games):
 
     if not GAME_API_URL or not GAME_API_TOKEN:
-
-        raise RuntimeError(
-            "缺少 GAME_API_URL 或 GAME_API_TOKEN，"
-            "请在 GitHub Actions Secrets 中配置。"
-        )
+        raise RuntimeError("缺少 GAME_API_URL 或 GAME_API_TOKEN")
 
     if not games:
-
         print("当天没有需要上传数据库的记录")
         return
 
-    clean_games = []
+    headers = {
+        "Authorization": f"Bearer {GAME_API_TOKEN}",
+        "Content-Type": "application/json; charset=utf-8"
+    }
 
-    for row in games:
+    batch_size = 10
+    total = len(games)
+    success_count = 0
+    failed_batches = []
 
-        item = {}
+    print(f"\n准备上传 {total} 条游戏记录，每批 {batch_size} 条")
 
-        for key, value in row.items():
+    for start in range(0, total, batch_size):
+
+        batch = games[start:start + batch_size]
+        batch_number = start // batch_size + 1
+        total_batches = (total + batch_size - 1) // batch_size
+
+        clean_games = []
+
+        for row in batch:
+
+            item = {}
+
+            for key, value in row.items():
+
+                try:
+                    missing = pd.isna(value)
+
+                    if isinstance(missing, bool) and missing:
+                        item[key] = ""
+                        continue
+
+                except (TypeError, ValueError):
+                    pass
+
+                if hasattr(value, "isoformat"):
+
+                    try:
+                        item[key] = value.isoformat(sep=" ")
+                    except TypeError:
+                        item[key] = value.isoformat()
+
+                elif key == "game_id":
+                    item[key] = str(value).strip()
+
+                elif isinstance(value, (str, int, float, bool)) or value is None:
+                    item[key] = value
+
+                else:
+                    item[key] = str(value)
+
+            clean_games.append(item)
+
+        payload = json.dumps(
+            {"games": clean_games},
+            ensure_ascii=False
+        ).encode("utf-8")
+
+        print(
+            f"\n上传第 {batch_number}/{total_batches} 批，"
+            f"本批 {len(clean_games)} 条"
+        )
+
+        uploaded = False
+
+        for attempt in range(1, 4):
 
             try:
 
-                missing = pd.isna(value)
+                response = requests.post(
+                    GAME_API_URL,
+                    data=payload,
+                    headers=headers,
+                    timeout=(20, 120)
+                )
 
-                if isinstance(missing, bool) and missing:
+                print("HTTP 状态：", response.status_code)
 
-                    item[key] = ""
-                    continue
+                if response.status_code != 200:
 
-            except (TypeError, ValueError):
-                pass
+                    print("接口返回：", response.text[:1000])
+                    response.raise_for_status()
 
-            if hasattr(value, "isoformat"):
+                result = response.json()
 
-                try:
-                    item[key] = value.isoformat(sep=" ")
+                if not result.get("success"):
+                    raise RuntimeError(str(result))
 
-                except TypeError:
-                    item[key] = value.isoformat()
+                count = int(result.get("upserted", 0))
+                success_count += count
+                uploaded = True
 
-            elif key == "game_id":
+                print(
+                    f"第 {batch_number} 批上传成功，"
+                    f"数据库处理 {count} 条"
+                )
 
-                item[key] = str(value).strip()
+                break
 
-            elif isinstance(value, (str, int, float, bool)) or value is None:
+            except Exception as e:
 
-                item[key] = value
+                print(
+                    f"第 {batch_number} 批第 "
+                    f"{attempt}/3 次上传失败：{e}"
+                )
 
-            else:
+                if attempt < 3:
+                    time.sleep(attempt * 5)
 
-                item[key] = str(value)
+        if not uploaded:
 
-        clean_games.append(item)
+            failed_batches.append({
+                "batch": batch_number,
+                "games": [
+                    str(item.get("game_id", ""))
+                    for item in clean_games
+                ]
+            })
 
-    headers = {
-        "Authorization": f"Bearer {GAME_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
+            print(f"第 {batch_number} 批上传失败，继续下一批")
 
-    print(
-        f"\n正在上传当天 {len(clean_games)} 条记录到宝塔 MySQL..."
-    )
+        time.sleep(2)
 
-    response = requests.post(
-        GAME_API_URL,
-        json={"games": clean_games},
-        headers=headers,
-        timeout=120
-    )
+    print("\n===================================")
+    print("游戏数据上传结束")
+    print("计划上传：", total)
+    print("数据库处理成功：", success_count)
+    print("失败批次数：", len(failed_batches))
+    print("===================================")
 
-    print(
-        "数据库接口 HTTP 状态：",
-        response.status_code
-    )
+    if failed_batches:
 
-    print(
-        "数据库接口返回：",
-        response.text[:2000]
-    )
+        os.makedirs(DATA_DIR, exist_ok=True)
 
-    response.raise_for_status()
-
-    try:
-
-        result = response.json()
-
-    except ValueError as e:
-
-        raise RuntimeError(
-            "数据库接口没有返回有效 JSON"
-        ) from e
-
-    if not result.get("success"):
-
-        raise RuntimeError(
-            f"数据库写入失败：{result}"
+        failed_file = os.path.join(
+            DATA_DIR,
+            "数据库上传失败记录.json"
         )
 
-    print(
-        "数据库上传完成，处理记录数：",
-        result.get("upserted", 0)
-    )
+        with open(failed_file, "w", encoding="utf-8") as f:
+            json.dump(
+                failed_batches,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+        print("失败批次已保存：", failed_file)
+
+        raise RuntimeError(
+            f"仍有 {len(failed_batches)} 批游戏数据上传失败，"
+            "请检查宝塔服务器日志"
+        )
+
 
 
 # =====================================================
