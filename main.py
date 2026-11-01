@@ -43,11 +43,8 @@ PROGRESS_FILE = "progress.json"
 # 建议运行时输入，不要把密码写在代码里
 # =====================================================
 
-USERNAME = os.getenv("qqaazz")
-PASSWORD = os.getenv("aa123456")
-
-if not USERNAME or not PASSWORD:
-    raise RuntimeError("未配置网站账号或密码，请检查 GitHub Secrets")
+USERNAME = "qqaazz"
+PASSWORD = "你的实际密码"
 
 # =====================================================
 # Session
