@@ -950,13 +950,14 @@ def save_failed(game_id, detail_url):
 # =====================================================
 
 
+
 def upload_to_mysql_api(games):
 
     if not GAME_API_URL or not GAME_API_TOKEN:
         raise RuntimeError("缺少 GAME_API_URL 或 GAME_API_TOKEN")
 
     if not games:
-        print("当天没有需要上传数据库的记录")
+        print("Excel 总表没有游戏记录")
         return
 
     headers = {
@@ -964,22 +965,29 @@ def upload_to_mysql_api(games):
         "Content-Type": "application/json; charset=utf-8"
     }
 
-    batch_size = max(1, len(games))
+    # 每批上传 100 条
+    batch_size = 100
+
     total = len(games)
     success_count = 0
     failed_batches = []
 
-    print(f"\n准备上传 {total} 条游戏记录，每批 {batch_size} 条")
+    print("\n===================================")
+    print("开始按照 Excel 总表顺序同步数据库")
+    print("Excel 总表游戏数量：", total)
+    print("每批上传数量：", batch_size)
+    print("===================================")
 
     for start in range(0, total, batch_size):
 
         batch = games[start:start + batch_size]
+
         batch_number = start // batch_size + 1
         total_batches = (total + batch_size - 1) // batch_size
 
         clean_games = []
 
-        for row in batch:
+        for offset, row in enumerate(batch):
 
             item = {}
 
@@ -1003,13 +1011,22 @@ def upload_to_mysql_api(games):
                         item[key] = value.isoformat()
 
                 elif key == "game_id":
+
                     item[key] = str(value).strip()
 
                 elif isinstance(value, (str, int, float, bool)) or value is None:
+
                     item[key] = value
 
                 else:
+
                     item[key] = str(value)
+
+            # =================================================
+            # 关键：按照 Excel 总表中的实际位置分配排序号
+            # =================================================
+
+            item["sort_order"] = 10001 + start + offset
 
             clean_games.append(item)
 
@@ -1019,8 +1036,18 @@ def upload_to_mysql_api(games):
         ).encode("utf-8")
 
         print(
-            f"\n上传第 {batch_number}/{total_batches} 批，"
-            f"本批 {len(clean_games)} 条"
+            f"\n上传第 {batch_number}/{total_batches} 批"
+        )
+
+        print(
+            "本批游戏数量：", len(clean_games)
+        )
+
+        print(
+            "本批排序范围：",
+            clean_games[0]["sort_order"],
+            "至",
+            clean_games[-1]["sort_order"]
         )
 
         uploaded = False
@@ -1033,7 +1060,7 @@ def upload_to_mysql_api(games):
                     GAME_API_URL,
                     data=payload,
                     headers=headers,
-                    timeout=(20, 120)
+                    timeout=(20, 180)
                 )
 
                 print("HTTP 状态：", response.status_code)
@@ -1041,6 +1068,7 @@ def upload_to_mysql_api(games):
                 if response.status_code != 200:
 
                     print("接口返回：", response.text[:1000])
+
                     response.raise_for_status()
 
                 result = response.json()
@@ -1049,6 +1077,7 @@ def upload_to_mysql_api(games):
                     raise RuntimeError(str(result))
 
                 count = int(result.get("upserted", 0))
+
                 success_count += count
                 uploaded = True
 
@@ -1073,19 +1102,22 @@ def upload_to_mysql_api(games):
 
             failed_batches.append({
                 "batch": batch_number,
+                "start": start,
                 "games": [
                     str(item.get("game_id", ""))
                     for item in clean_games
                 ]
             })
 
-            print(f"第 {batch_number} 批上传失败，继续下一批")
+            print(
+                f"第 {batch_number} 批上传失败"
+            )
 
         time.sleep(2)
 
     print("\n===================================")
-    print("游戏数据上传结束")
-    print("计划上传：", total)
+    print("Excel 总表同步结束")
+    print("Excel 总表数量：", total)
     print("数据库处理成功：", success_count)
     print("失败批次数：", len(failed_batches))
     print("===================================")
@@ -1099,7 +1131,12 @@ def upload_to_mysql_api(games):
             "数据库上传失败记录.json"
         )
 
-        with open(failed_file, "w", encoding="utf-8") as f:
+        with open(
+            failed_file,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
             json.dump(
                 failed_batches,
                 f,
@@ -1107,11 +1144,10 @@ def upload_to_mysql_api(games):
                 indent=2
             )
 
-        print("失败批次已保存：", failed_file)
+        print("失败批次记录：", failed_file)
 
         raise RuntimeError(
-            f"仍有 {len(failed_batches)} 批游戏数据上传失败，"
-            "请检查宝塔服务器日志"
+            f"有 {len(failed_batches)} 批数据上传失败"
         )
 
 
