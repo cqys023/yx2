@@ -38,6 +38,8 @@ jobs:
 
       - name: 执行每日采集并上传数据库
         env:
+          YYDS_USERNAME: ${{ secrets.YYDS_USERNAME }}
+          YYDS_PASSWORD: ${{ secrets.YYDS_PASSWORD }}
           GAME_API_URL: ${{ secrets.GAME_API_URL }}
           GAME_API_TOKEN: ${{ secrets.GAME_API_TOKEN }}
         run: |
