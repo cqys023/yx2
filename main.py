@@ -629,6 +629,40 @@ def queue_detail_task(game_id, detail_url):
 
 
 # =====================================================
+# 检查宝塔 details 目录中是否已经存在详情 HTML
+# =====================================================
+
+def get_existing_detail_ids(game_ids):
+    """向 PHP 查询服务器真实文件；只把存在且非空的 HTML 视为已完成。"""
+    normalized_ids = []
+    seen = set()
+    for value in game_ids:
+        game_id = str(value).strip()
+        if not game_id or game_id.lower() == "nan":
+            continue
+        if game_id not in seen:
+            seen.add(game_id)
+            normalized_ids.append(game_id)
+
+    existing = set()
+    for start in range(0, len(normalized_ids), 500):
+        batch = normalized_ids[start:start + 500]
+        result = api_post(
+            {
+                "action": "check_details",
+                "game_ids": batch
+            },
+            "检查宝塔详情 HTML 文件"
+        )
+        existing.update(
+            str(x).strip()
+            for x in result.get("existing_ids", [])
+        )
+
+    return existing
+
+
+# =====================================================
 # 上传单个详情页到宝塔
 # =====================================================
 
@@ -707,6 +741,31 @@ def retry_failed_details():
         print("详情页任务队列为空")
         return
 
+    # 先检查宝塔服务器上的真实文件。文件已经存在且非空，就从重试队列移除。
+    try:
+        queued_ids = [str(task.get("game_id", "")).strip() for task in tasks]
+        existing_ids = get_existing_detail_ids(queued_ids)
+    except Exception as e:
+        print("检查宝塔详情文件失败，本轮暂不处理详情任务：", e)
+        return
+
+    already_done = [
+        task for task in tasks
+        if str(task.get("game_id", "")).strip() in existing_ids
+    ]
+    tasks = [
+        task for task in tasks
+        if str(task.get("game_id", "")).strip() not in existing_ids
+    ]
+
+    if already_done:
+        print("宝塔中已经存在详情 HTML，跳过采集和上传：", len(already_done), "条")
+        save_detail_failed(tasks)
+
+    if not tasks:
+        print("所有详情页文件均已存在，无需采集或上传")
+        return
+
     remaining = []
 
     for task in tasks:
@@ -774,7 +833,22 @@ def rebuild_daily_detail_tasks(daily_data):
         print("当天没有游戏记录")
         return
 
+    # 批量检查宝塔 details 目录，避免重复采集和上传已有详情页。
+    daily_ids_to_check = [
+        str(item.get("game_id", "")).strip()
+        for item in daily_data
+        if str(item.get("game_id", "")).strip()
+        and str(item.get("game_id", "")).strip().lower() != "nan"
+    ]
+
+    try:
+        existing_ids = get_existing_detail_ids(daily_ids_to_check)
+    except Exception as e:
+        print("检查宝塔详情文件失败，本轮不新增详情页任务：", e)
+        return
+
     added = 0
+    skipped_existing = 0
 
     for item in daily_data:
 
@@ -793,6 +867,11 @@ def rebuild_daily_detail_tasks(daily_data):
             print(f"游戏 {game_id} 缺少详情页地址")
             continue
 
+        if game_id in existing_ids:
+            skipped_existing += 1
+            print(f"宝塔详情 HTML 已存在，跳过：{game_id}")
+            continue
+
         queue_detail_task(
             game_id,
             detail_url
@@ -803,6 +882,7 @@ def rebuild_daily_detail_tasks(daily_data):
     tasks = load_detail_failed()
 
     print("当天 Excel 游戏数量：", len(daily_data))
+    print("宝塔中已存在、跳过的详情页：", skipped_existing)
     print("检查并补充任务数量：", added)
     print("当前待上传任务总数：", len(tasks))
     print("=" * 50)
