@@ -1035,10 +1035,14 @@ def save_failed(game_id, detail_url):
 
 
 
+
 def clean_excel_row(row):
-    """将 Excel 行清理为可 JSON 序列化的数据。"""
+    """清理 Excel 数据，避免解压密码等数字字符串出现 .0。"""
     item = {}
+
     for key, value in row.items():
+
+        # 空值处理
         try:
             missing = pd.isna(value)
             if bool(missing):
@@ -1047,18 +1051,34 @@ def clean_excel_row(row):
         except (TypeError, ValueError):
             pass
 
+        # 日期处理
         if hasattr(value, "isoformat"):
             try:
                 item[key] = value.isoformat(sep=" ")
             except TypeError:
                 item[key] = value.isoformat()
+
+        # 游戏 ID
         elif key == "game_id":
             item[key] = str(value).strip()
+
+        # 解压密码：统一转成字符串，去掉浮点数末尾的 .0
+        elif key == "password":
+
+            if isinstance(value, float) and value.is_integer():
+                item[key] = str(int(value))
+            else:
+                item[key] = str(value).strip()
+
+        # 其他字段
         elif isinstance(value, (str, int, float, bool)) or value is None:
             item[key] = value
+
         else:
             item[key] = str(value)
+
     return item
+
 
 
 def game_data_hash(item):
